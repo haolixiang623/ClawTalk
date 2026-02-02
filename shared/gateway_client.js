@@ -177,7 +177,7 @@ export class GatewayClient {
       client: {
         // Use a known/expected client id.
         id: "webchat",
-        version: "0.1.55",
+        version: "0.1.56",
         platform: "chrome",
         mode: "webchat"
       },
