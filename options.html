@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ClawTalk Options</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header>
+        <h1>Settings</h1>
+      </header>
+
+      <label>
+        Gateway URL
+        <input id="gateway-url" type="text" placeholder="ws://127.0.0.1:18789" />
+      </label>
+
+      <label>
+        Additional Gateway permissions (one per line)
+        <textarea id="gateway-origins" rows="3" placeholder="wss://example.com/*"></textarea>
+      </label>
+      <div style="font-size: 12px; opacity: 0.7; margin-top: -8px;">
+        The current Gateway URL is always included automatically. Use this box only for extra origins.
+      </div>
+
+      <label>
+        Gateway Token (or Device Token)
+        <textarea id="gateway-token" rows="3" placeholder="Paste token here"></textarea>
+      </label>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Gateway Headers (optional)</span>
+          <button id="add-header" class="link-button" type="button">Add header</button>
+        </div>
+        <div id="headers-list" class="headers-list"></div>
+      </section>
+
+      <label>
+        Dry run mode
+        <input id="dry-run" type="checkbox" />
+      </label>
+
+      <label>
+        Push-to-talk mode (hold Talk button to speak)
+        <input id="push-to-talk" type="checkbox" />
+      </label>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Session</span>
+        </div>
+
+        <div class="headers-list">
+          <label>
+            Session key
+            <input id="session-key" type="text" placeholder="main" />
+          </label>
+          <div style="font-size: 12px; opacity: 0.7;">
+            Tip: use the same session key shown in the Control UI / webchat you want to share context with.
+          </div>
+        </div>
+      </section>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Session History</span>
+        </div>
+
+        <div class="headers-list">
+          <label>
+            Load session history
+            <input id="load-session-history" type="checkbox" />
+          </label>
+
+          <label>
+            History lines
+            <input id="session-history-limit" type="number" min="10" max="2000" step="10" />
+          </label>
+        </div>
+      </section>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Retention</span>
+        </div>
+
+        <div class="headers-list">
+          <label>
+            Max log entries
+            <input id="max-log-entries" type="number" min="10" max="2000" step="10" />
+          </label>
+
+          <label>
+            Max chat messages
+            <input id="max-chat-messages" type="number" min="1" max="500" step="1" />
+          </label>
+        </div>
+      </section>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Event Log</span>
+        </div>
+
+        <div class="headers-list">
+          <label>
+            DEBUG
+            <input id="log-debug" type="checkbox" />
+          </label>
+
+          <div style="padding-left: 16px; display: grid; gap: 8px;">
+            <label>
+              Gateway event names
+              <input id="log-debug-gateway-events" type="checkbox" />
+            </label>
+
+            <label>
+              Gateway heartbeat info
+              <input id="log-debug-gateway-heartbeats" type="checkbox" />
+            </label>
+
+            <label>
+              Transcript text
+              <input id="log-debug-transcript-text" type="checkbox" />
+            </label>
+
+            <label>
+              Gateway res payload (raw)
+              <input id="log-debug-gateway-res-payload" type="checkbox" />
+            </label>
+          </div>
+
+          <label>
+            INFO
+            <input id="log-info" type="checkbox" />
+          </label>
+
+          <div style="padding-left: 16px; display: grid; gap: 8px;">
+            <label>
+              Connect/disconnect
+              <input id="log-info-connect" type="checkbox" />
+            </label>
+
+            <label>
+              Assistant messages (replies)
+              <input id="log-info-assistant" type="checkbox" />
+            </label>
+
+            <label>
+              Speech/transcripts
+              <input id="log-info-speech" type="checkbox" />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <label>
+        Language (STT default)
+        <input id="stt-lang" type="text" placeholder="it-IT" />
+      </label>
+
+      <section class="mic-section">
+        <div class="mic-header">
+          <span>Microphone</span>
+          <button id="refresh-mics" class="link-button" type="button">Refresh</button>
+        </div>
+
+        <label>
+          Input device
+          <select id="mic-select"></select>
+        </label>
+
+        <div class="mic-test-row">
+          <button id="mic-test" class="header-remove" type="button">Test mic</button>
+          <div class="mic-meter" aria-label="Microphone level">
+            <div id="mic-meter-fill" class="mic-meter-fill"></div>
+          </div>
+          <span id="mic-test-status" class="mic-test-status"></span>
+        </div>
+
+        <div class="speech-test-row">
+          <button id="speech-test" class="header-remove" type="button">Test speech</button>
+          <input id="speech-test-text" type="text" placeholder="Insert a sample phrase in the selected language" />
+          <span id="speech-test-status" class="mic-test-status"></span>
+        </div>
+      </section>
+
+      <section class="headers-section">
+        <div class="headers-header">
+          <span>Text-to-speech</span>
+        </div>
+
+        <div class="headers-list">
+          <label>
+            Provider
+            <select id="tts-provider">
+              <option value="default">Default (SpeechSynthesis)</option>
+              <option value="elevenlabs">ElevenLabs</option>
+            </select>
+          </label>
+
+          <div id="elevenlabs-settings">
+            <label>
+              ElevenLabs API Key
+              <input id="elevenlabs-key" type="password" />
+            </label>
+
+            <label>
+              ElevenLabs Voice ID
+              <input id="elevenlabs-voice" type="text" placeholder="Voice ID" />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <button id="save" class="talk-button" type="button">Save</button>
+      <div id="save-status"></div>
+    </main>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

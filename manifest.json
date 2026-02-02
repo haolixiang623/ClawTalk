@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "ClawTalk Talk Panel",
+  "version": "0.1.55",
+  "description": "Talk panel for continuous voice loop with OpenClaw Gateway.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "ClawTalk Talk Panel",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "microphone",
+    "offscreen",
+    "sidePanel",
+    "declarativeNetRequest"
+  ],
+  "optional_permissions": [
+    "notifications"
+  ],
+  "host_permissions": [
+    "ws://127.0.0.1:18789/*",
+    "https://api.elevenlabs.io/*"
+  ],
+  "optional_host_permissions": [
+    "ws://*/*",
+    "wss://*/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html"
+}
