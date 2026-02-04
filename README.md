@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icons/icon-256.png" alt="ClawTalk logo">
+</p>
+
 # ClawTalk (Chrome Extension)
 
 A small Chrome side panel that turns **OpenClaw Gateway** into a lightweight “talk to my assistant” experience.
@@ -47,6 +51,8 @@ In practice it’s a “voice remote control” for an OpenClaw session: you can
 
 Then open the side panel:
 - click the extension icon → open **Side panel** (or from the Extensions menu)
+
+For additional settings (custom headers, Cloudflare ZeroTrust, ElevenLabs API, and more) check out [this page](https://www.ryadel.com/en/clawtalk-talk-to-your-assistant-chrome-extension-openclaw/).
 
 ## Configuration
 
@@ -136,3 +142,7 @@ shared/
 ## Contributing
 
 Issues and PRs are welcome. If you change behavior or UI, please include a short note in the PR describing how to test it.
+
+## References
+
+ - [OpenClaw official website](https://www.ryadel.com/en/clawtalk-talk-to-your-assistant-chrome-extension-openclaw/)
