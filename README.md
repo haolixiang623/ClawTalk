@@ -42,12 +42,14 @@ In practice it’s a “voice remote control” for an OpenClaw session: you can
   - bounded in‑memory buffers to avoid Chrome performance degradation
 - **Debug controls** (fine-grained) to keep logs useful without spamming.
 
-## Installation (developer mode)
+## Installation
+At the moment, ClawTalk is not yet available on the **Chrome Web Store**, so it can only be installed in _Developer Mode_ as follows:
 
-1. Open Chrome → `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select the repository folder (`ClawTalk/`)
+1. Download the latest release (ZIP) from the [official GitHub repository](https://github.com/Ryadel/ClawTalk).
+2. Open Chrome → `chrome://extensions`
+3. Enable **Developer mode**
+4. Click **Load unpacked**
+5. Select the repository folder (`ClawTalk/`)
 
 Then open the side panel:
 - click the extension icon → open **Side panel** (or from the Extensions menu)
