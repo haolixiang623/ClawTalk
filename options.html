@@ -14,7 +14,7 @@
 
       <label>
         Gateway URL
-        <input id="gateway-url" type="text" placeholder="ws://127.0.0.1:18789" />
+        <input id="gateway-url" type="text" placeholder="ws://127.0.0.1:18789" style="width: 100%; box-sizing: border-box;" />
       </label>
 
       <label>
@@ -29,6 +29,15 @@
         Gateway Token (or Device Token)
         <textarea id="gateway-token" rows="3" placeholder="Paste token here"></textarea>
       </label>
+      <div style="font-size: 12px; opacity: 0.7; margin-top: -8px;">
+        Local OpenClaw usually needs <code>gateway.auth.token</code> from <code>~/.openclaw/openclaw.json</code>
+        or <code>openclaw config get gateway.auth.token</code>.
+      </div>
+
+      <div class="connection-test-row">
+        <button id="test-connection" class="link-button" type="button">Test Connection</button>
+        <span id="test-connection-status" class="mic-test-status"></span>
+      </div>
 
       <section class="headers-section">
         <div class="headers-header">

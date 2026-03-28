@@ -1,11 +1,18 @@
 import { GatewayClient } from "./shared/gateway_client.js";
 import { DEFAULT_SETTINGS, TalkState, buildState } from "./shared/state.js";
+import {
+  isLoopbackGatewayUrl,
+  migrateLegacyGatewaySettings,
+} from "./shared/gateway-defaults.mjs";
 
 let settings = { ...DEFAULT_SETTINGS };
 let state = buildState(settings);
 
 let gatewayClient = null;
 let reconnectTimer = null;
+let reconnectAttempt = 0;
+const MAX_RECONNECT_DELAY_MS = 60000; // 1 minute max
+const INITIAL_RECONNECT_DELAY_MS = 2000; // 2 seconds
 
 // Track one-off TTS requests (e.g., Settings -> Test speech)
 const pendingTtsRequests = new Map(); // requestId -> { resolve, reject, timeoutId, meta }
@@ -133,7 +140,19 @@ function logError(message) {
 }
 
 async function loadSettings() {
-  settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
+  const storedSettings = await chrome.storage.local.get(DEFAULT_SETTINGS);
+  const { settings: migratedSettings, didMigrate } =
+    migrateLegacyGatewaySettings(storedSettings);
+
+  settings = { ...DEFAULT_SETTINGS, ...migratedSettings };
+
+  if (didMigrate) {
+    await chrome.storage.local.set({
+      gatewayUrl: settings.gatewayUrl,
+      gatewayToken: settings.gatewayToken,
+    });
+  }
+
   state.gatewayUrl = settings.gatewayUrl;
   state.gatewayAdditionalOrigins = settings.gatewayAdditionalOrigins;
   state.dryRun = settings.dryRun;
@@ -163,6 +182,14 @@ async function loadSettings() {
 
   // TTS provider settings (used by offscreen).
   state.ttsProvider = settings.ttsProvider || (settings.useElevenLabs ? "elevenlabs" : "default");
+
+  if (didMigrate) {
+    logInfo(
+      "connect",
+      "Reset legacy remote gateway defaults to the local OpenClaw gateway. Add your local gateway token in Settings before connecting.",
+    );
+  }
+
   broadcastState();
   await updateGatewayHeaderRules();
   return settings;
@@ -241,14 +268,44 @@ function clearReconnect() {
   }
 }
 
+/**
+ * Schedule a reconnect with exponential backoff.
+ * Each attempt doubles the delay, capped at MAX_RECONNECT_DELAY_MS.
+ */
 function scheduleReconnect() {
   if (reconnectTimer || !state.connectEnabled) return;
+
+  // Cap attempts to avoid indefinite growth (reset after successful connect or manual toggle).
+  if (reconnectAttempt > 16) {
+    logError(`Reconnect attempts exhausted (${reconnectAttempt}). Stopping auto-reconnect. Press Connect to retry manually.`);
+    return;
+  }
+
+  // Exponential backoff: 2s, 4s, 8s, 16s, ... up to 60s.
+  const delayMs = Math.min(
+    INITIAL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempt),
+    MAX_RECONNECT_DELAY_MS
+  );
+
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (state.connectEnabled && !state.gatewayConnected) {
+      reconnectAttempt += 1;
       connectGateway();
     }
-  }, 2000);
+  }, delayMs);
+
+  if (reconnectAttempt > 0) {
+    logInfo("connect", `Reconnecting in ${Math.round(delayMs / 1000)}s (attempt ${reconnectAttempt + 1})...`);
+  }
+}
+
+/** Reset reconnect state after a successful connect. */
+function resetReconnectState() {
+  if (reconnectAttempt !== 0) {
+    reconnectAttempt = 0;
+    logInfo("connect", "Reconnect state reset.");
+  }
 }
 
 function disconnectGateway() {
@@ -283,8 +340,12 @@ function connectGateway() {
     return;
   }
 
-  if (!settings.gatewayToken) {
-    logError("Missing gateway token. Please set it in Settings.");
+  if (!settings.gatewayToken && !settings.deviceToken) {
+    const missingTokenMessage = isLoopbackGatewayUrl(settings.gatewayUrl)
+      ? "Missing gateway token or device token. Local OpenClaw gateways usually require the token from ~/.openclaw/openclaw.json or `openclaw config get gateway.auth.token`."
+      : "Missing gateway token or device token. Please set it in Settings.";
+
+    logError(missingTokenMessage);
     state.gatewayConnected = false;
     broadcastState();
     return;
@@ -306,6 +367,9 @@ function connectGateway() {
     .connect()
     .then(() => {
       state.gatewayConnected = true;
+
+      // Reset reconnect state after successful connection.
+      resetReconnectState();
 
       // If we're connected and not currently in a talk loop, show an idle-ready state.
       if (!state.talkEnabled) {
@@ -341,6 +405,34 @@ function handleGatewaySocketState(status, detail) {
     logInfo("connect", `Gateway socket: ${status}`);
   }
 
+  if (status === "device_token_issued" && detail?.deviceToken) {
+    settings.deviceToken = String(detail.deviceToken);
+    chrome.storage.local.set({ deviceToken: settings.deviceToken }).catch(() => {});
+    logInfo("connect", "Gateway issued a paired device token for future reconnects.");
+    return;
+  }
+
+  if (status === "pairing_required") {
+    state.connectEnabled = false;
+    broadcastState();
+
+    const requestId = detail?.requestId ? ` Request ID: ${detail.requestId}.` : "";
+    const reason = detail?.reason ? ` Reason: ${detail.reason}.` : "";
+    logError(
+      "This browser extension now presents a real OpenClaw device identity, so the gateway requires a one-time device approval before chat.write is allowed." +
+      reason +
+      requestId +
+      " Approve the pending device in OpenClaw, then press Connect again.",
+    );
+    return;
+  }
+
+  // Show diagnostic hints as error logs for better visibility.
+  if (status === "socket_diagnostic" && detail?.hint) {
+    logError(`Connection hint: ${detail.hint}`);
+    return;
+  }
+
   if (status === "socket_closed") {
     state.gatewayConnected = false;
 
@@ -358,6 +450,28 @@ function handleGatewaySocketState(status, detail) {
         updateTalkStatus(TalkState.ERROR);
       }
       return;
+    }
+
+    // Provide helpful hints for common close codes.
+    let hint = null;
+    if (code === 1006) {
+      hint = "Connection closed abnormally (code 1006). This usually means:\n" +
+             "1. The lobster service on the server is not running or has crashed\n" +
+             "2. The extension does not have permission to connect to this origin\n" +
+             "3. A firewall or proxy is blocking WebSocket connections\n\n" +
+             "Try: Check if the lobster service is running on the server, or go to Settings > Gateway URL and save to grant permissions.";
+    } else if (code === 1008) {
+      hint = "Connection rejected by server (code 1008). Check your token or server configuration.";
+    } else if (code === 1001) {
+      hint = "Server is going away. The gateway may have been shut down.";
+    } else if (code === 1011) {
+      hint = "Server encountered an unexpected condition. Check server logs.";
+    }
+
+    if (hint) {
+      logError(hint);
+    } else {
+      logInfo("connect", `Connection closed unexpectedly (code ${code}). Retries remaining: ${16 - reconnectAttempt}`);
     }
 
     broadcastState();
@@ -654,7 +768,19 @@ function sendTranscript(text) {
   }
 
   const targetSessionKey = (settings.sessionKey || "main").trim() || "main";
-  gatewayClient.sendChat(text, targetSessionKey);
+  gatewayClient.sendChat(text, targetSessionKey)
+    .then((response) => {
+      if (response?.ok === false) {
+        const errorMessage = response?.error?.message || "chat.send failed.";
+        updateTalkStatus(TalkState.ERROR);
+        logError(`Cannot send transcript: ${errorMessage}`);
+      }
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      updateTalkStatus(TalkState.ERROR);
+      logError(`Cannot send transcript: ${message}`);
+    });
 
   updateTalkStatus(TalkState.THINKING);
   logDebug("speech.transcriptText", `Transcript: ${text}`);
@@ -817,12 +943,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Show user's message immediately in CHAT.
     upsertChatMessage({ runId: `user-${Date.now()}`, role: "user", text, final: true });
 
-    gatewayClient.sendChat(text, targetSessionKey);
-    updateTalkStatus(TalkState.THINKING);
-    logInfo("speech", `Text prompt sent (${text.length} chars).`);
+    gatewayClient.sendChat(text, targetSessionKey)
+      .then((response) => {
+        if (response?.ok === false) {
+          const errorMessage = response?.error?.message || "chat.send failed.";
+          updateTalkStatus(TalkState.ERROR);
+          logError(`Text prompt failed: ${errorMessage}`);
+          sendResponse?.({ ok: false, error: errorMessage });
+          return;
+        }
 
-    sendResponse?.({ ok: true });
-    return;
+        updateTalkStatus(TalkState.THINKING);
+        logInfo("speech", `Text prompt sent (${text.length} chars).`);
+        sendResponse?.({ ok: true });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        updateTalkStatus(TalkState.ERROR);
+        logError(`Text prompt failed: ${message}`);
+        sendResponse?.({ ok: false, error: message });
+      });
+
+    return true;
   }
 
   if (message.type === "panel.toggleConnect") {

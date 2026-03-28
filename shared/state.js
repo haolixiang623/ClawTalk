@@ -1,3 +1,5 @@
+import { DEFAULT_GATEWAY_SETTINGS } from "./gateway-defaults.mjs";
+
 export const TalkState = Object.freeze({
   DISCONNECTED: "disconnected",
   IDLE: "idle",
@@ -8,8 +10,10 @@ export const TalkState = Object.freeze({
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  gatewayUrl: "ws://127.0.0.1:18789",
-  gatewayToken: "",
+  gatewayUrl: DEFAULT_GATEWAY_SETTINGS.gatewayUrl,
+  gatewayToken: DEFAULT_GATEWAY_SETTINGS.gatewayToken,
+  // Persisted after the first successful paired connect.
+  deviceToken: "",
   gatewayHeaders: [],
   // Gateway permission model:
   // - gatewayUrl origin is always included automatically.
@@ -23,7 +27,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
   // Session history
   // Load recent messages from chat.history when connecting / switching sessions.
-  loadSessionHistory: true,
+  loadSessionHistory: false,  // 禁用以避免权限错误
   // How many messages to request from chat.history.
   sessionHistoryLimit: 200,
 

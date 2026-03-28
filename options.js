@@ -1,3 +1,10 @@
+import {
+  DEFAULT_GATEWAY_SETTINGS,
+  migrateLegacyGatewaySettings,
+} from "./shared/gateway-defaults.mjs";
+import { probeGatewayConnection } from "./shared/gateway-probe.mjs";
+import { mergeSettingsForSave } from "./shared/gateway-settings.mjs";
+
 const gatewayUrlInput = document.getElementById("gateway-url");
 const gatewayTokenInput = document.getElementById("gateway-token");
 const gatewayOriginsInput = document.getElementById("gateway-origins");
@@ -43,9 +50,13 @@ const elevenlabsVoiceInput = document.getElementById("elevenlabs-voice");
 const saveButton = document.getElementById("save");
 const saveStatus = document.getElementById("save-status");
 
+// Connection test
+const testConnectionButton = document.getElementById("test-connection");
+const testConnectionStatus = document.getElementById("test-connection-status");
+
 const DEFAULTS = {
-  gatewayUrl: "ws://127.0.0.1:18789",
-  gatewayToken: "",
+  ...DEFAULT_GATEWAY_SETTINGS,
+  deviceToken: "",
   gatewayHeaders: [],
   // Back-compat: old list. With the new behavior, the active gateway origin is always included
   // automatically, and this text box is only for "additional" origins.
@@ -317,7 +328,18 @@ function syncTtsUi() {
 }
 
 async function loadSettings() {
-  const data = await chrome.storage.local.get(DEFAULTS);
+  const storedData = await chrome.storage.local.get(DEFAULTS);
+  const { settings: data, didMigrate } = migrateLegacyGatewaySettings(storedData);
+
+  if (didMigrate) {
+    await chrome.storage.local.set({
+      gatewayUrl: data.gatewayUrl,
+      gatewayToken: data.gatewayToken,
+    });
+
+    chrome.runtime.sendMessage({ type: "options.updated" });
+  }
+
   gatewayUrlInput.value = data.gatewayUrl;
   gatewayTokenInput.value = data.gatewayToken;
 
@@ -373,6 +395,9 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  const storedData = await chrome.storage.local.get(DEFAULTS);
+  const { settings: previousSettings } = migrateLegacyGatewaySettings(storedData);
+
   const gatewayHeaders = Array.from(headersList.querySelectorAll(".header-row"))
     .map((row) => {
       const name = row.querySelector(".header-name")?.value.trim() || "";
@@ -400,7 +425,7 @@ async function saveSettings() {
   const gatewayAdditionalOrigins = parseGatewayAllowedOrigins(gatewayOriginsInput?.value);
   const allOrigins = [gatewayOrigin, ...gatewayAdditionalOrigins.filter((o) => o !== gatewayOrigin)];
 
-  const settings = {
+  const settings = mergeSettingsForSave(previousSettings, {
     gatewayUrl,
     gatewayToken: gatewayTokenInput.value.trim(),
     gatewayHeaders,
@@ -434,7 +459,7 @@ async function saveSettings() {
     useElevenLabs, // back-compat for existing code paths
     elevenlabsKey: useElevenLabs ? elevenlabsKeyInput.value.trim() : "",
     elevenlabsVoice: useElevenLabs ? elevenlabsVoiceInput.value.trim() : ""
-  };
+  });
 
   if (useElevenLabs) {
     if (!settings.elevenlabsKey || !settings.elevenlabsVoice) {
@@ -451,7 +476,11 @@ async function saveSettings() {
   }
 
   await chrome.storage.local.set(settings);
-  showStatus("Saved.");
+
+  const deviceTokenWasCleared =
+    Boolean(previousSettings.deviceToken) && !settings.deviceToken;
+
+  showStatus(deviceTokenWasCleared ? "Saved. Cleared paired device token." : "Saved.");
 
   chrome.runtime.sendMessage({ type: "options.updated" });
 }
@@ -525,6 +554,99 @@ speechTestButton?.addEventListener("click", () => {
     }
     setSpeechTestStatus(res?.error || "Failed to play.");
   });
+});
+
+function setTestConnectionStatus(text, isError = false) {
+  if (!testConnectionStatus) return;
+  testConnectionStatus.textContent = text || "";
+  testConnectionStatus.style.color = isError ? "#e74c3c" : "";
+}
+
+async function testGatewayConnection() {
+  if (!testConnectionButton) return;
+  testConnectionButton.disabled = true;
+  setTestConnectionStatus("Testing connection...");
+
+  const url = String(gatewayUrlInput?.value || "").trim();
+  if (!url) {
+    setTestConnectionStatus("Please enter a Gateway URL first.", true);
+    testConnectionButton.disabled = false;
+    return;
+  }
+
+  // Normalize the URL to get the origin for permission check.
+  let urlObj;
+  try {
+    urlObj = new URL(url);
+  } catch {
+    setTestConnectionStatus("Invalid Gateway URL format.", true);
+    testConnectionButton.disabled = false;
+    return;
+  }
+
+  const origin = `${urlObj.protocol}//${urlObj.host}/*`;
+
+  // Check if we have permission to connect to this origin.
+  if (chrome.permissions?.contains) {
+    try {
+      const hasPermission = await chrome.permissions.contains({ origins: [origin] });
+      if (!hasPermission) {
+        // Try to request permission.
+        setTestConnectionStatus("Requesting permission...");
+        try {
+          const granted = await chrome.permissions.request({ origins: [origin] });
+          if (!granted) {
+            setTestConnectionStatus(
+              "Permission denied. Please grant access in the extension details page.",
+              true
+            );
+            testConnectionButton.disabled = false;
+            return;
+          }
+          setTestConnectionStatus("Permission granted.");
+        } catch {
+          // Permission API may not be available in options page context.
+          setTestConnectionStatus(
+            `No permission for ${origin}. Please add it to the "Additional Gateway permissions" box and save.`,
+            true
+          );
+          testConnectionButton.disabled = false;
+          return;
+        }
+      }
+    } catch {
+      // Ignore permission check errors.
+    }
+  }
+
+  setTestConnectionStatus("Attempting authenticated gateway handshake...");
+
+  const storedData = await chrome.storage.local.get(DEFAULTS);
+  const { settings: previousSettings } = migrateLegacyGatewaySettings(storedData);
+  const effectiveSettings = mergeSettingsForSave(previousSettings, {
+    gatewayUrl: url,
+    gatewayToken: gatewayTokenInput.value.trim(),
+    deviceToken: previousSettings.deviceToken || "",
+  });
+
+  const result = await probeGatewayConnection({
+    url,
+    token: effectiveSettings.gatewayToken,
+    deviceToken: effectiveSettings.deviceToken,
+  });
+
+  testConnectionButton.disabled = false;
+
+  if (result.success) {
+    setTestConnectionStatus(result.note || "Connection successful!");
+  } else {
+    const hint = result.hint || result.error || "Unknown error.";
+    setTestConnectionStatus(`Failed: ${hint}`, true);
+  }
+}
+
+testConnectionButton?.addEventListener("click", () => {
+  testGatewayConnection();
 });
 
 loadSettings();

@@ -15,6 +15,16 @@ body {
   padding: 16px;
 }
 
+/* Ensure all form inputs take full width */
+.panel input[type="text"],
+.panel input[type="number"],
+.panel input[type="password"],
+.panel textarea,
+.panel select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 header {
   display: flex;
   align-items: center;
@@ -422,4 +432,21 @@ h1 {
 
 .log-entry.debug .level {
   color: #8b5cf6;
+}
+
+/* Connection test row */
+.connection-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.connection-test-row .link-button {
+  white-space: nowrap;
+}
+
+.connection-test-row .mic-test-status {
+  font-size: 12px;
+  word-break: break-word;
 }
