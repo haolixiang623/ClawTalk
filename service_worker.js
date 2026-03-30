@@ -4,6 +4,19 @@ import {
   isLoopbackGatewayUrl,
   migrateLegacyGatewaySettings,
 } from "./shared/gateway-defaults.mjs";
+import {
+  buildDemoPreReviewMockAnalysis,
+  buildDemoPreReviewPrompt,
+  buildDemoPreReviewResultPayload,
+  buildDemoPreReviewSummary,
+  DEMO_PRE_REVIEW_RESULT_STORAGE_KEY,
+  DEMO_PRE_REVIEW_RESULT_URL,
+  DEMO_PRE_REVIEW_SELECTORS,
+  DEMO_PRE_REVIEW_SESSION_KEY,
+  DEMO_PRE_REVIEW_URL,
+  findLatestAssistantReplyText,
+  normalizeDemoAttachments,
+} from "./shared/demo-pre-review.mjs";
 
 let settings = { ...DEFAULT_SETTINGS };
 let state = buildState(settings);
@@ -36,6 +49,311 @@ const chatRunBuffers = new Map(); // runId -> { text, lastUpdatedAtMs }
 // Deduplication for chat events (gateway may retransmit or client may reconnect).
 const lastChatSeqByRunId = new Map(); // runId -> last seq processed
 const lastFinalTextByRunId = new Map(); // runId -> last final text logged
+const DEMO_PRE_REVIEW_ORIGIN_PATTERN = "http://127.0.0.1:4180/*";
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForTabReady(tabId, { timeoutMs = 15000, expectedPrefix = "" } = {}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId);
+    const url = String(tab?.url || "");
+    const urlMatches = !expectedPrefix || url.startsWith(expectedPrefix);
+
+    if (tab?.status === "complete" && urlMatches) {
+      return tab;
+    }
+
+    await delay(250);
+  }
+
+  throw new Error(`Timed out waiting for tab ${tabId} to load.`);
+}
+
+async function executeDemoScript(tabId, func, args = []) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func,
+    args,
+  });
+
+  return results?.[0]?.result;
+}
+
+async function ensureDemoExecutionAccess() {
+  if (!chrome.tabs?.create || !chrome.tabs?.update) {
+    throw new Error("chrome.tabs API is unavailable. Reload the extension after updating the manifest.");
+  }
+
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("chrome.scripting API is unavailable. Reload the extension after updating the manifest.");
+  }
+
+  if (chrome.permissions?.contains) {
+    try {
+      const hasOriginAccess = await chrome.permissions.contains({ origins: [DEMO_PRE_REVIEW_ORIGIN_PATTERN] });
+      if (!hasOriginAccess) {
+        throw new Error(
+          `Missing host access for ${DEMO_PRE_REVIEW_ORIGIN_PATTERN}. Reload the unpacked extension so the new demo permissions apply.`,
+        );
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(
+        `Unable to verify host access for ${DEMO_PRE_REVIEW_ORIGIN_PATTERN}. Reload the unpacked extension and try again.`,
+      );
+    }
+  }
+}
+
+async function loadSessionMessages(sessionKey, limit = 20) {
+  if (!gatewayClient || !gatewayClient.connected) {
+    throw new Error("Gateway not connected.");
+  }
+
+  const response = await gatewayClient.request(
+    "chat.history",
+    { sessionKey, limit: Math.max(5, Math.min(2000, Number(limit) || 20)) },
+    { timeoutMs: 20000 },
+  );
+
+  return Array.isArray(response?.payload?.messages) ? response.payload.messages : [];
+}
+
+async function waitForAssistantReply({
+  sessionKey,
+  previousReplyText = "",
+  timeoutMs = 45000,
+  pollMs = 2000,
+}) {
+  const startedAt = Date.now();
+  const baseline = String(previousReplyText || "").trim();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const messages = await loadSessionMessages(sessionKey, 20);
+    const latestReplyText = findLatestAssistantReplyText(messages);
+    if (latestReplyText && latestReplyText !== baseline) {
+      return latestReplyText;
+    }
+
+    await delay(pollMs);
+  }
+
+  throw new Error(`Timed out waiting for an assistant reply in session ${sessionKey}.`);
+}
+
+async function showDemoResultPage(tabId, payload) {
+  const serializablePayload = JSON.parse(JSON.stringify(payload));
+
+  await executeDemoScript(
+    tabId,
+    (storageKey, value) => {
+      sessionStorage.setItem(storageKey, JSON.stringify(value));
+      return true;
+    },
+    [DEMO_PRE_REVIEW_RESULT_STORAGE_KEY, serializablePayload],
+  );
+
+  await chrome.tabs.update(tabId, { url: DEMO_PRE_REVIEW_RESULT_URL });
+  await waitForTabReady(tabId, { expectedPrefix: DEMO_PRE_REVIEW_RESULT_URL });
+}
+
+async function sendPromptToGateway({
+  text,
+  sessionKey,
+  chatPreviewText = "",
+  sourceLabel = "Text prompt",
+}) {
+  const promptText = String(text || "").trim();
+  if (!promptText) {
+    throw new Error("Message is empty.");
+  }
+
+  if (!settings.dryRun && (!gatewayClient || !gatewayClient.connected)) {
+    throw new Error("Gateway not connected.");
+  }
+
+  const previewText = String(chatPreviewText || promptText).trim() || promptText;
+  upsertChatMessage({ runId: `user-${Date.now()}`, role: "user", text: previewText, final: true });
+
+  if (settings.dryRun) {
+    logInfo("speech", `${sourceLabel} (dry run): ${promptText}`);
+    return { ok: true, dryRun: true };
+  }
+
+  const response = await gatewayClient.sendChat(promptText, sessionKey);
+  if (response?.ok === false) {
+    throw new Error(response?.error?.message || "chat.send failed.");
+  }
+
+  updateTalkStatus(TalkState.THINKING);
+  logInfo("speech", `${sourceLabel} sent (${promptText.length} chars).`);
+  return response;
+}
+
+async function runDemoPreReviewFlow() {
+  if (state.demoPreReviewRunning) {
+    throw new Error("Demo flow is already running.");
+  }
+
+  state.demoPreReviewRunning = true;
+  broadcastState();
+
+  try {
+    await ensureDemoExecutionAccess();
+    logInfo("connect", `Demo permissions ready for ${DEMO_PRE_REVIEW_ORIGIN_PATTERN}.`);
+    logInfo("connect", `Opening demo review list: ${DEMO_PRE_REVIEW_URL}`);
+    const tab = await chrome.tabs.create({ url: DEMO_PRE_REVIEW_URL, active: true });
+    const tabId = tab?.id;
+
+    if (typeof tabId !== "number") {
+      throw new Error("Failed to create demo tab.");
+    }
+
+    await waitForTabReady(tabId, { expectedPrefix: DEMO_PRE_REVIEW_URL });
+
+    const firstCase = await executeDemoScript(
+      tabId,
+      (selectors) => {
+        const link = document.querySelector(selectors.firstPendingLink);
+        if (!(link instanceof HTMLAnchorElement)) {
+          return { ok: false, error: "No pending case found on the demo list page." };
+        }
+
+        return {
+          ok: true,
+          detailUrl: new URL(link.getAttribute("href") || "", window.location.href).href,
+          caseTitle: link.dataset.caseTitle || link.textContent || "",
+        };
+      },
+      [DEMO_PRE_REVIEW_SELECTORS],
+    );
+
+    if (!firstCase?.ok || !firstCase?.detailUrl) {
+      throw new Error(firstCase?.error || "Failed to read the first demo case.");
+    }
+
+    logInfo("connect", `Opening first demo case: ${firstCase.caseTitle || firstCase.detailUrl}`);
+    await chrome.tabs.update(tabId, { url: firstCase.detailUrl });
+    await waitForTabReady(tabId, { expectedPrefix: "http://127.0.0.1:4180/demo/review-detail.html" });
+
+    const extractedDetail = await executeDemoScript(
+      tabId,
+      (selectors) => {
+        const root = document.querySelector(selectors.detailRoot);
+        if (!(root instanceof HTMLElement)) {
+          return { ok: false, error: "Demo detail page did not render expected content." };
+        }
+
+        const readText = (selector) => {
+          const node = document.querySelector(selector);
+          return node ? String(node.textContent || "").trim() : "";
+        };
+
+        const attachments = Array.from(document.querySelectorAll(selectors.attachmentLink))
+          .filter((node) => node instanceof HTMLAnchorElement)
+          .map((link) => ({
+            name: link.dataset.attachmentName || String(link.textContent || "").trim(),
+            url: link.href,
+          }));
+
+        return {
+          ok: true,
+          caseTitle: readText(selectors.caseTitle),
+          caseNumber: readText(selectors.caseNumber),
+          caseStatus: readText(selectors.caseStatus),
+          detailUrl: window.location.href,
+          attachments,
+          extractedAt: new Date().toISOString(),
+        };
+      },
+      [DEMO_PRE_REVIEW_SELECTORS],
+    );
+
+    if (!extractedDetail?.ok) {
+      throw new Error(extractedDetail?.error || "Failed to extract demo detail data.");
+    }
+
+    const detail = {
+      ...extractedDetail,
+      attachments: normalizeDemoAttachments(extractedDetail.attachments),
+    };
+
+    const prompt = buildDemoPreReviewPrompt(detail);
+    const summary = buildDemoPreReviewSummary(detail);
+    let previousReplyText = "";
+
+    if (!settings.dryRun) {
+      try {
+        previousReplyText = findLatestAssistantReplyText(
+          await loadSessionMessages(DEMO_PRE_REVIEW_SESSION_KEY, 20),
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logDebug("gateway.eventNames", `Failed to read baseline demo session history: ${msg}`);
+      }
+    }
+
+    logInfo(
+      "connect",
+      `Captured demo case ${detail.caseNumber || "<unknown>"} with ${detail.attachments.length} attachment(s).`,
+    );
+
+    await sendPromptToGateway({
+      text: prompt,
+      sessionKey: DEMO_PRE_REVIEW_SESSION_KEY,
+      chatPreviewText: summary,
+      sourceLabel: "Demo pre-review prompt",
+    });
+
+    logInfo("connect", `Demo pre-review dispatched to session ${DEMO_PRE_REVIEW_SESSION_KEY}. Waiting for analysis...`);
+
+    let analysisText = "";
+    let resultSource = "openclaw";
+    try {
+      analysisText = settings.dryRun
+        ? buildDemoPreReviewMockAnalysis(detail)
+        : await waitForAssistantReply({
+          sessionKey: DEMO_PRE_REVIEW_SESSION_KEY,
+          previousReplyText,
+        });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      resultSource = settings.dryRun ? "dry-run" : "timeout";
+      analysisText = settings.dryRun
+        ? buildDemoPreReviewMockAnalysis(detail)
+        : [
+          "办件概览：已完成页面抓取并成功把附件信息发送给 OpenClaw。",
+          `附件检查：共抓取 ${detail.attachments.length} 个附件，请先确认链接有效性。`,
+          "预审建议：",
+          "1. 检查 OpenClaw 当前 session 是否返回了分析结果。",
+          "2. 确认模型或 skill 是否正常执行。",
+          "3. 如需重跑，可再次点击预审 Demo。",
+          `风险提醒：等待 OpenClaw 返回结果时超时，错误信息：${msg}`,
+        ].join("\n");
+      logError(`Demo result fallback used: ${msg}`);
+    }
+
+    const resultPayload = buildDemoPreReviewResultPayload({
+      detail,
+      analysisText,
+      sessionKey: DEMO_PRE_REVIEW_SESSION_KEY,
+      source: resultSource,
+    });
+
+    await showDemoResultPage(tabId, resultPayload);
+    logInfo("connect", `Demo result page opened (${resultSource}).`);
+    return { ok: true };
+  } finally {
+    state.demoPreReviewRunning = false;
+    broadcastState();
+  }
+}
 
 function broadcastState() {
   chrome.runtime.sendMessage({ type: "state.update", payload: state });
@@ -925,46 +1243,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    if (settings.dryRun) {
-      // Show it in CHAT + logs for visibility.
-      upsertChatMessage({ runId: `user-${Date.now()}`, role: "user", text, final: true });
-      logInfo("speech", `Text prompt (dry run): ${text}`);
-      sendResponse?.({ ok: true });
-      return;
-    }
-
-    if (!gatewayClient || !gatewayClient.connected) {
-      sendResponse?.({ ok: false, error: "Gateway not connected." });
-      return;
-    }
-
     const targetSessionKey = (settings.sessionKey || "main").trim() || "main";
 
-    // Show user's message immediately in CHAT.
-    upsertChatMessage({ runId: `user-${Date.now()}`, role: "user", text, final: true });
-
-    gatewayClient.sendChat(text, targetSessionKey)
-      .then((response) => {
-        if (response?.ok === false) {
-          const errorMessage = response?.error?.message || "chat.send failed.";
-          updateTalkStatus(TalkState.ERROR);
-          logError(`Text prompt failed: ${errorMessage}`);
-          sendResponse?.({ ok: false, error: errorMessage });
-          return;
-        }
-
-        updateTalkStatus(TalkState.THINKING);
-        logInfo("speech", `Text prompt sent (${text.length} chars).`);
+    sendPromptToGateway({
+      text,
+      sessionKey: targetSessionKey,
+      chatPreviewText: text,
+      sourceLabel: "Text prompt",
+    })
+      .then(() => {
         sendResponse?.({ ok: true });
       })
       .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
         updateTalkStatus(TalkState.ERROR);
-        logError(`Text prompt failed: ${message}`);
-        sendResponse?.({ ok: false, error: message });
+        logError(`Text prompt failed: ${errorMessage}`);
+        sendResponse?.({ ok: false, error: errorMessage });
       });
 
     return true;
+  }
+
+  if (message.type === "panel.runDemoPreReview") {
+    if (state.demoPreReviewRunning) {
+      sendResponse?.({ ok: false, error: "Demo flow is already running." });
+      return;
+    }
+
+    sendResponse?.({ ok: true, started: true });
+
+    runDemoPreReviewFlow()
+      .then(() => {
+        logInfo("connect", "Demo pre-review flow completed.");
+      })
+      .catch((error) => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        updateTalkStatus(TalkState.ERROR);
+        logError(`Demo pre-review failed: ${errorMessage}`);
+      });
+
+    return;
   }
 
   if (message.type === "panel.toggleConnect") {

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>预审 Demo 结果</title>
+    <link rel="stylesheet" href="/demo/styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <section class="demo-hero compact">
+        <div>
+          <p class="demo-eyebrow">GovCopilot Demo</p>
+          <h1 id="result-title">预审结果加载中...</h1>
+          <p class="demo-subtitle" id="result-subtitle">正在读取插件回传的抓取结果与分析内容。</p>
+        </div>
+        <a class="demo-link-button ghost" href="/demo/review-list.html">重新开始</a>
+      </section>
+
+      <section class="demo-detail-grid">
+        <article class="demo-panel">
+          <div class="demo-panel-header">
+            <span>抓取快照</span>
+            <span id="result-source-badge">等待中</span>
+          </div>
+          <dl class="demo-definition-list">
+            <div>
+              <dt>办件编号</dt>
+              <dd id="result-case-number">-</dd>
+            </div>
+            <div>
+              <dt>当前状态</dt>
+              <dd id="result-case-status">-</dd>
+            </div>
+            <div>
+              <dt>详情地址</dt>
+              <dd><a id="result-detail-url" class="demo-inline-link" href="#">-</a></dd>
+            </div>
+            <div>
+              <dt>Session</dt>
+              <dd id="result-session-key">-</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="demo-panel">
+          <div class="demo-panel-header">
+            <span>附件列表</span>
+            <span id="result-attachment-count">0 个附件</span>
+          </div>
+          <ul class="demo-attachment-list" id="result-attachment-list"></ul>
+        </article>
+      </section>
+
+      <section class="demo-panel">
+        <div class="demo-panel-header">
+          <span>OpenClaw 分析结果</span>
+          <span id="result-generated-at">-</span>
+        </div>
+        <pre class="demo-analysis-card" id="result-analysis-text">暂无结果</pre>
+      </section>
+    </main>
+
+    <script>
+      const STORAGE_KEY = "demo-pre-review-result";
+      const fallback = {
+        caseTitle: "无结果",
+        caseNumber: "-",
+        caseStatus: "-",
+        detailUrl: "#",
+        extractedAt: "",
+        attachments: [],
+        analysisText: "未找到插件回传的结果数据。",
+        sessionKey: "-",
+        source: "missing",
+        generatedAt: "",
+      };
+
+      let payload = fallback;
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          payload = { ...fallback, ...JSON.parse(raw) };
+        }
+      } catch (error) {
+        payload = {
+          ...fallback,
+          analysisText: `结果解析失败：${error instanceof Error ? error.message : String(error)}`,
+          source: "error",
+        };
+      }
+
+      document.title = `${payload.caseTitle} - 预审 Demo 结果`;
+      document.getElementById("result-title").textContent = payload.caseTitle;
+      document.getElementById("result-subtitle").textContent = `办件 ${payload.caseNumber} 的抓取与分析已完成，结果来源：${payload.source}`;
+      document.getElementById("result-case-number").textContent = payload.caseNumber;
+      document.getElementById("result-case-status").textContent = payload.caseStatus;
+      document.getElementById("result-session-key").textContent = payload.sessionKey;
+      document.getElementById("result-source-badge").textContent = payload.source;
+      document.getElementById("result-generated-at").textContent = payload.generatedAt || "刚刚";
+      document.getElementById("result-analysis-text").textContent = payload.analysisText || "暂无结果";
+
+      const detailLink = document.getElementById("result-detail-url");
+      detailLink.href = payload.detailUrl || "#";
+      detailLink.textContent = payload.detailUrl || "-";
+
+      const attachmentList = document.getElementById("result-attachment-list");
+      const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+      document.getElementById("result-attachment-count").textContent = `${attachments.length} 个附件`;
+
+      if (!attachments.length) {
+        const empty = document.createElement("li");
+        empty.className = "demo-attachment-item";
+        empty.textContent = "未抓取到附件";
+        attachmentList.appendChild(empty);
+      } else {
+        attachments.forEach((attachment) => {
+          const item = document.createElement("li");
+          item.className = "demo-attachment-item";
+
+          const link = document.createElement("a");
+          link.href = attachment.url;
+          link.textContent = attachment.name;
+          link.className = "demo-attachment-link";
+
+          const meta = document.createElement("span");
+          meta.textContent = attachment.url;
+
+          item.append(link, meta);
+          attachmentList.appendChild(item);
+        });
+      }
+    </script>
+  </body>
+</html>

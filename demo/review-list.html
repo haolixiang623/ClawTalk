@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>待预审办件 Demo</title>
+    <link rel="stylesheet" href="/demo/styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <section class="demo-hero">
+        <div>
+          <p class="demo-eyebrow">GovCopilot Demo</p>
+          <h1>待预审办件</h1>
+          <p class="demo-subtitle">插件会打开这个固定地址，选择第一条待预审办件，并进入详情页抓取附件链接。</p>
+        </div>
+        <div class="demo-pill">共 3 条待处理</div>
+      </section>
+
+      <section class="demo-panel">
+        <div class="demo-panel-header">
+          <span>待预审列表</span>
+          <span>优先级已排序</span>
+        </div>
+
+        <article class="demo-case-card">
+          <div>
+            <p class="demo-case-status">待预审</p>
+            <h2>建筑工程施工许可申请</h2>
+            <p class="demo-case-meta">编号 CASE-2026-0001 · 企业首次申报</p>
+          </div>
+          <a
+            class="demo-link-button"
+            data-demo-case-link
+            data-case-title="建筑工程施工许可申请"
+            href="/demo/review-detail.html?id=CASE-2026-0001"
+          >
+            查看详情
+          </a>
+        </article>
+
+        <article class="demo-case-card muted">
+          <div>
+            <p class="demo-case-status">待预审</p>
+            <h2>食品经营许可延续</h2>
+            <p class="demo-case-meta">编号 CASE-2026-0002 · 材料补正后再次提交</p>
+          </div>
+          <a class="demo-link-button ghost" href="/demo/review-detail.html?id=CASE-2026-0002">查看详情</a>
+        </article>
+
+        <article class="demo-case-card muted">
+          <div>
+            <p class="demo-case-status">待预审</p>
+            <h2>特种设备使用登记</h2>
+            <p class="demo-case-meta">编号 CASE-2026-0003 · 跨部门联合审批</p>
+          </div>
+          <a class="demo-link-button ghost" href="/demo/review-detail.html?id=CASE-2026-0003">查看详情</a>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

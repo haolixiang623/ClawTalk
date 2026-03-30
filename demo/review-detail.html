@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>待预审办件详情 Demo</title>
+    <link rel="stylesheet" href="/demo/styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <section class="demo-hero compact">
+        <div>
+          <p class="demo-eyebrow">GovCopilot Demo</p>
+          <h1 data-demo-case-title>加载中...</h1>
+          <p class="demo-subtitle">详情页会暴露结构化字段和附件区，供插件抓取。</p>
+        </div>
+        <a class="demo-link-button ghost" href="/demo/review-list.html">返回列表</a>
+      </section>
+
+      <section class="demo-detail-grid" data-demo-case-detail>
+        <article class="demo-panel">
+          <div class="demo-panel-header">
+            <span>办件信息</span>
+            <span data-demo-case-status>待预审</span>
+          </div>
+          <dl class="demo-definition-list">
+            <div>
+              <dt>办件编号</dt>
+              <dd data-demo-case-number></dd>
+            </div>
+            <div>
+              <dt>申请主体</dt>
+              <dd id="applicant-name"></dd>
+            </div>
+            <div>
+              <dt>申报事项</dt>
+              <dd id="case-subject"></dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="demo-panel">
+          <div class="demo-panel-header">
+            <span>附件列表</span>
+            <span id="attachment-count">0 个附件</span>
+          </div>
+          <ul class="demo-attachment-list" id="attachment-list"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const CASES = {
+        "CASE-2026-0001": {
+          title: "建筑工程施工许可申请",
+          status: "待预审",
+          applicant: "杭州星河建设有限公司",
+          subject: "新建厂房主体结构施工许可",
+          attachments: [
+            { name: "营业执照.pdf", href: "/demo/files/license.pdf" },
+            { name: "法人身份证.jpg", href: "/demo/files/legal-person-id.jpg" },
+            { name: "施工图审查合格书.txt", href: "/demo/files/review-pass.txt" }
+          ]
+        },
+        "CASE-2026-0002": {
+          title: "食品经营许可延续",
+          status: "待预审",
+          applicant: "西湖区云巷餐饮店",
+          subject: "餐饮服务经营许可证延续申请",
+          attachments: [
+            { name: "原许可证副本.pdf", href: "/demo/files/food-license.pdf" },
+            { name: "从业人员健康证明.txt", href: "/demo/files/health-proof.txt" }
+          ]
+        },
+        "CASE-2026-0003": {
+          title: "特种设备使用登记",
+          status: "待预审",
+          applicant: "滨江智造研究院",
+          subject: "压力容器使用登记",
+          attachments: [
+            { name: "设备合格证.pdf", href: "/demo/files/equipment-certificate.pdf" },
+            { name: "安装监督检验证明.txt", href: "/demo/files/inspection-note.txt" }
+          ]
+        }
+      };
+
+      const params = new URLSearchParams(window.location.search);
+      const caseId = params.get("id") || "CASE-2026-0001";
+      const data = CASES[caseId] || CASES["CASE-2026-0001"];
+
+      document.title = `${data.title} - 待预审办件详情`;
+      document.querySelector("[data-demo-case-title]").textContent = data.title;
+      document.querySelector("[data-demo-case-status]").textContent = data.status;
+      document.querySelector("[data-demo-case-number]").textContent = caseId;
+      document.getElementById("applicant-name").textContent = data.applicant;
+      document.getElementById("case-subject").textContent = data.subject;
+      document.getElementById("attachment-count").textContent = `${data.attachments.length} 个附件`;
+
+      const list = document.getElementById("attachment-list");
+      data.attachments.forEach((attachment) => {
+        const item = document.createElement("li");
+        item.className = "demo-attachment-item";
+
+        const link = document.createElement("a");
+        link.href = attachment.href;
+        link.textContent = attachment.name;
+        link.className = "demo-attachment-link";
+        link.dataset.demoAttachmentLink = "true";
+        link.dataset.attachmentName = attachment.name;
+
+        const meta = document.createElement("span");
+        meta.textContent = "点击可查看模拟附件";
+
+        item.append(link, meta);
+        list.appendChild(item);
+      });
+    </script>
+  </body>
+</html>

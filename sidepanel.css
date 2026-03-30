@@ -122,6 +122,43 @@ h1 {
   font-weight: 600;
 }
 
+.demo-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.03));
+}
+
+.demo-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.demo-title {
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.demo-subtitle {
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.78;
+}
+
+.demo-button {
+  min-width: 108px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
 /* Simple iOS-like switch */
 .switch {
   position: relative;

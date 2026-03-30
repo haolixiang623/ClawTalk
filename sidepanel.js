@@ -4,6 +4,7 @@ import { createSpeechRecognitionAdapter } from "./shared/stt.js";
 const connectToggle = document.getElementById("connect-toggle");
 const talkToggle = document.getElementById("talk-toggle");
 const speakingToggle = document.getElementById("speaking-toggle");
+const demoPreReviewRun = document.getElementById("demo-pre-review-run");
 const statusText = document.getElementById("status-text");
 const micIndicator = document.getElementById("mic-indicator");
 const connectionText = document.getElementById("connection-text");
@@ -100,6 +101,11 @@ function updateUI(state) {
   talkToggle.classList.toggle("active", state.talkEnabled);
 
   speakingToggle.checked = Boolean(state.speakingEnabled);
+  if (demoPreReviewRun) {
+    const canRunDemo = Boolean(state.dryRun) || Boolean(state.gatewayConnected);
+    demoPreReviewRun.disabled = !canRunDemo || Boolean(state.demoPreReviewRunning);
+    demoPreReviewRun.textContent = state.demoPreReviewRunning ? "运行中..." : "预审 Demo";
+  }
 
   micIndicator.classList.toggle("listening", state.status === "listening");
   micIndicator.classList.toggle("speaking", state.status === "speaking");
@@ -475,6 +481,18 @@ chatInput?.addEventListener("keydown", (e) => {
     e.preventDefault();
     submitChatInput();
   }
+});
+
+demoPreReviewRun?.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "panel.runDemoPreReview" }, (res) => {
+    if (chrome.runtime.lastError) {
+      send("panel.logError", { message: chrome.runtime.lastError.message || "Demo flow failed." });
+      return;
+    }
+    if (res && res.ok) return;
+    const error = res?.error || "Demo flow failed.";
+    send("panel.logError", { message: error });
+  });
 });
 
 function shouldRefreshSessions() {

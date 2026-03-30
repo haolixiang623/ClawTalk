@@ -62,6 +62,10 @@ openclaw devices approve <requestId>
 openclaw config get gateway.auth.token
 ```
 
+```bash
+docker exec openclaw-openclaw-gateway-1 sh -lc 'node -e "const fs=require(\"fs\"); const cfg=JSON.parse(fs.readFileSync(\"/home/node/.openclaw/openclaw.json\",\"utf8\")); console.log(cfg.gateway.auth.token)"'
+```
+
 或者查看：
 
 ```text

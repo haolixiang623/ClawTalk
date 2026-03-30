@@ -80,6 +80,7 @@ export function buildState(settings) {
     // Talk loop (mic/STT -> gateway -> reply) state.
     status: TalkState.DISCONNECTED,
     talkEnabled: false,
+    demoPreReviewRunning: false,
 
     // Output mode.
     speakingEnabled: Boolean(settings.speakingEnabled),
